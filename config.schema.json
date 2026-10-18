@@ -1,0 +1,44 @@
+{
+  "pluginAlias": "InPostAir",
+  "pluginType": "platform",
+  "singular": false,
+  "headerDisplay": "Exposes air quality data from InPost Paczkomat parcel-locker sensors in Poland as HomeKit accessories. The plugin uses an unofficial (undocumented) InPost endpoint and may break if InPost changes their site.",
+  "footerDisplay": "Find locker codes (e.g. ABC01A) in the InPost app or on inpost.pl. Keep the refresh interval at 10 minutes or more to avoid being rate-limited/blocked.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "InPost Air",
+        "required": true,
+        "placeholder": "InPost Air"
+      },
+      "lockers": {
+        "title": "Paczkomat locker codes",
+        "type": "array",
+        "required": true,
+        "minItems": 1,
+        "items": {
+          "title": "Locker code",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+$",
+          "placeholder": "ABC01A"
+        }
+      },
+      "refreshIntervalMinutes": {
+        "title": "Refresh interval (minutes)",
+        "type": "integer",
+        "minimum": 5,
+        "maximum": 60,
+        "default": 10
+      },
+      "userAgent": {
+        "title": "User-Agent",
+        "type": "string",
+        "required": false,
+        "description": "Leave empty to identify honestly as homebridge-inpost-air. Set to 'browser' to mimic a Chrome User-Agent (may help or hurt against anti-bot protection)."
+      }
+    }
+  }
+}

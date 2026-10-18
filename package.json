@@ -1,0 +1,32 @@
+{
+  "name": "homebridge-inpost-air",
+  "displayName": "Homebridge InPost Air",
+  "version": "1.0.0",
+  "description": "Homebridge plugin that exposes air quality data (PM1/PM2.5/PM10, NO2, O3, temperature, humidity, pressure) from InPost Paczkomat parcel-locker air sensors in Poland as HomeKit accessories.",
+  "license": "MIT",
+  "main": "index.js",
+  "scripts": {},
+  "keywords": [
+    "homebridge-plugin",
+    "homekit",
+    "inpost",
+    "paczkomat",
+    "air-quality",
+    "pm2.5",
+    "pm10",
+    "poland"
+  ],
+  "engines": {
+    "node": ">=18.0.0",
+    "homebridge": ">=1.7.0"
+  },
+  "author": "Tomas Pita da Silva",
+  "homepage": "https://github.com/silvetti/homebridge-inpost-air#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/silvetti/homebridge-inpost-air.git"
+  },
+  "bugs": {
+    "url": "https://github.com/silvetti/homebridge-inpost-air/issues"
+  }
+}
