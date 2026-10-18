@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * homebridge-inpost-air
+ * homebridge-inpost-air (v1.1.0)
  *
  * Exposes InPost Paczkomat parcel-locker air quality sensors as HomeKit
  * accessories. Units vary: some publish PM values only, others also
@@ -30,7 +30,7 @@ const PLATFORM_NAME = 'InPostAir';
 const POINTS_URL = 'https://inpost.pl/sites/default/files/points.json';
 const SHIPX_POINT_URL = 'https://api-shipx-pl.easypack24.net/v1/points/';
 const INPOST = 'https://inpost.pl';
-const SHIPX_URL_REGEX = /data-shipx-url="(?:\/en)?\/shipx-point-data\/([^/]+)\/([^/]+)\/air_index_level"/;
+const SHIPX_URL_REGEX = /data-shipx-url="(?:\/en)?\/shipx-point-data\/([^/]+)\/[^/]+\/air_index_level"/;
 
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
@@ -45,6 +45,12 @@ const PAGE_LANG = 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7';
 const SHIPX_LEVELS = {
   VERY_GOOD: 1, GOOD: 2, MODERATE: 3, SUFFICIENT: 4, BAD: 5, VERY_BAD: 5,
 };
+
+// inpost.pl 404s for "no sensor data" lockers; InPost sometimes enables a
+// unit's backend later, so re-probe daily instead of giving up forever.
+const NO_SENSOR_RETRY_MS = 24 * 60 * 60 * 1000;
+// points.json changes rarely (new lockers); refresh the cache daily.
+const POINTS_TTL_MS = 24 * 60 * 60 * 1000;
 
 function pageHeaders(ua) {
   return { 'User-Agent': ua, 'Accept': PAGE_ACCEPT, 'Accept-Language': PAGE_LANG };
@@ -192,10 +198,16 @@ class InPostAirPlatform {
     this.Characteristic = api.hap.Characteristic;
     this.cachedAccessories = new Map();
     this.pointsCache = null;
+    this.pointsCacheAt = 0;
     this.lockerInstances = [];
 
     const uaOpt = String(this.config.userAgent || '').trim();
     this.userAgent = uaOpt === 'browser' ? BROWSER_UA : (uaOpt || DEFAULT_UA);
+
+    // Optional friendly names per locker code: { "ABC01A": "Street corner" }.
+    this.labels = (this.config.labels && typeof this.config.labels === 'object')
+      ? this.config.labels
+      : {};
 
     // Exposure toggles: which layers (when the unit reports them) surface
     // in HomeKit. Logs always show the full payload regardless.
@@ -230,15 +242,18 @@ class InPostAirPlatform {
     const keep = new Set();
 
     for (const code of codes) {
+      const label = this.labels[code] || `Paczkomat ${code}`;
       const uuid = this.api.hap.uuid.generate(`${PLUGIN_NAME}:${code}`);
       keep.add(uuid);
       let accessory = this.cachedAccessories.get(uuid);
       if (!accessory) {
-        this.log.info(`Adding new accessory: Paczkomat ${code}`);
-        accessory = new this.api.platformAccessory(`Paczkomat ${code}`, uuid);
+        this.log.info(`Adding new accessory: ${label} (${code})`);
+        accessory = new this.api.platformAccessory(
+          label, uuid, this.api.hap.Categories.AIR_SENSOR,
+        );
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       }
-      this.lockerInstances.push(new InPostLockerAccessory(this, accessory, code));
+      this.lockerInstances.push(new InPostLockerAccessory(this, accessory, code, label));
     }
 
     const stale = [...this.cachedAccessories.keys()].filter((u) => !keep.has(u));
@@ -251,7 +266,7 @@ class InPostAirPlatform {
   }
 
   async getPoints() {
-    if (!this.pointsCache) {
+    if (!this.pointsCache || (Date.now() - this.pointsCacheAt) > POINTS_TTL_MS) {
       const res = await fetch(POINTS_URL, {
         headers: pageHeaders(this.userAgent),
         signal: AbortSignal.timeout(60000),
@@ -261,13 +276,14 @@ class InPostAirPlatform {
       }
       const json = await res.json();
       this.pointsCache = json.items || [];
+      this.pointsCacheAt = Date.now();
     }
     return this.pointsCache;
   }
 }
 
 class InPostLockerAccessory {
-  constructor(platform, accessory, lockerCode) {
+  constructor(platform, accessory, lockerCode, label) {
     this.platform = platform;
     this.accessory = accessory;
     this.code = lockerCode;
@@ -281,6 +297,10 @@ class InPostLockerAccessory {
     this.cookies = null;
     this.jarPath = path.join(os.tmpdir(), `inpost-air-${lockerCode}.cookies`);
 
+    this.refreshing = false;
+    this.blocked = false;
+    this.noSensorsUntil = 0;
+
     const info = accessory.getService(this.Service.AccessoryInformation);
     info
       .setCharacteristic(this.Characteristic.Manufacturer, 'InPost')
@@ -290,8 +310,10 @@ class InPostLockerAccessory {
     const C = this.Characteristic;
     const exposure = this.platform.exposure;
 
+    // Service display names stay generic; the accessory name (locker label)
+    // is what HomeKit prefixes onto tiles.
     this.airService = accessory.getService(this.Service.AirQualitySensor)
-      || accessory.addService(this.Service.AirQualitySensor, `Air Quality ${lockerCode}`, 'air-quality');
+      || accessory.addService(this.Service.AirQualitySensor, 'Air Quality', 'air-quality');
 
     // Prune characteristics that a previous (wider) config added but that
     // are now disabled: HomeKit keeps cached characteristics around
@@ -330,10 +352,10 @@ class InPostLockerAccessory {
     };
 
     this.tempService = ensureService(
-      this.Service.TemperatureSensor, `Temperature ${lockerCode}`, 'temperature', exposure.temperature,
+      this.Service.TemperatureSensor, 'Temperature', 'temperature', exposure.temperature,
     );
     this.humService = ensureService(
-      this.Service.HumiditySensor, `Humidity ${lockerCode}`, 'humidity', exposure.humidity,
+      this.Service.HumiditySensor, 'Humidity', 'humidity', exposure.humidity,
     );
 
     for (const svc of [this.tempService, this.humService]) {
@@ -413,7 +435,7 @@ class InPostLockerAccessory {
     );
     if (!res.ok) {
       problems.push(`fetch: HTTP ${res.status}`);
-      if (res.status === 404) this.noSensors = true;
+      if (res.status === 404) this.noSensorsUntil = Date.now() + NO_SENSOR_RETRY_MS;
       this.lockerId = null; // re-resolve next time
       return null;
     }
@@ -453,7 +475,7 @@ class InPostLockerAccessory {
     const text = out.slice(0, nl);
     if (status !== 200) {
       problems.push(`curl: HTTP ${status}`);
-      if (status === 404) this.noSensors = true;
+      if (status === 404) this.noSensorsUntil = Date.now() + NO_SENSOR_RETRY_MS;
       return null;
     }
     try {
@@ -494,13 +516,30 @@ class InPostLockerAccessory {
   }
 
   async refresh() {
+    // Guard against overlapping polls: Cloudflare-finicky rounds plus the
+    // ShipX fallback can outlive the next interval tick, and doubled
+    // requests are exactly what anti-bot systems notice first.
+    if (this.refreshing) {
+      this.log.debug?.(`[${this.code}] Previous poll still running; skipping this tick.`);
+      return;
+    }
+    this.refreshing = true;
+    try {
+      await this.doRefresh();
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  async doRefresh() {
     try {
       if (!this.point) {
         this.point = await this.findPoint();
       }
-      if (this.noSensors) {
-        return; // checked previously: no published sensor data for this locker
+      if (this.noSensorsUntil && Date.now() < this.noSensorsUntil) {
+        return; // backend reported no published sensor data; retry later
       }
+      this.noSensorsUntil = 0;
 
       const problems = [];
       let body = await this.fetchViaFetch(problems).catch((e) => {
@@ -514,13 +553,21 @@ class InPostLockerAccessory {
         });
       }
 
-      if (this.noSensors) {
-        this.log.warn(`[${this.code}] This paczkomat reports no air sensors (or data is not published).`);
+      if (this.noSensorsUntil) {
+        // Either transport got a 404 just now; lockout until tomorrow.
+        this.log.warn(
+          `[${this.code}] This paczkomat reports no air sensors (or data is not published); `
+          + 'retrying in 24 h.',
+        );
         this.markInactive();
         return;
       }
 
       if (body) {
+        if (this.blocked) {
+          this.blocked = false;
+          this.log.info(`[${this.code}] Detailed sensor data recovered.`);
+        }
         this.applyData(parseSensorLines(body.air_sensors), body.air_index_level, body.air_sensors);
         return;
       }
@@ -530,10 +577,19 @@ class InPostLockerAccessory {
       if (aq != null) {
         this.airService.updateCharacteristic(this.Characteristic.StatusActive, true);
         this.airService.updateCharacteristic(this.Characteristic.AirQuality, aq);
-        this.log.warn(
-          `[${this.code}] Detailed sensor data blocked (${problems.join('; ')}); `
-          + `using official ShipX API level ${shipxLevel} (${AQ_NAMES[aq]}) instead.`,
-        );
+        // Warn once when blocking starts; keep subsequent rounds quiet
+        // (debug) until it recovers.
+        if (!this.blocked) {
+          this.blocked = true;
+          this.log.warn(
+            `[${this.code}] Detailed sensor data blocked (${problems.join('; ')}); `
+            + `using official ShipX API level ${shipxLevel} (${AQ_NAMES[aq]}) instead.`,
+          );
+        } else {
+          this.log.debug?.(
+            `[${this.code}] Still blocked; ShipX level ${shipxLevel} (${AQ_NAMES[aq]}).`,
+          );
+        }
       } else {
         this.log.warn(
           `[${this.code}] Blocked everywhere and no ShipX level (${problems.join('; ')}).`,

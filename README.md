@@ -9,17 +9,17 @@ InPost has been fitting Envic-Sense air quality units to Paczkomat parcel locker
 - Some units: temperature, humidity
 - Some units: atmospheric pressure
 
-Not every paczkomat has a sensor, some have a sensor that publishes no data (the endpoint answers 404), and PM-only units are common - for those only the particulate characteristics populate in HomeKit. Payloads can also change over time: the same unit may publish PM-only one hour and full data (including temperature and humidity) the next. There is no way to know a unit's capabilities in advance; the plugin logs the exact payload fields on every poll.
+Not every paczkomat has a sensor, some have a sensor that publishes no data (the endpoint answers 404 - the plugin retries such lockers once daily, since InPost also enables backends over time), and PM-only units are common - for those only the particulate characteristics populate in HomeKit. Payloads can also change over time: the same unit may publish PM-only one hour and full data (including temperature and humidity) the next. There is no way to know a unit's capabilities in advance; the plugin logs the exact payload fields on every poll.
 
 ## What appears in HomeKit
 
-Per configured locker, one accessory with:
+Per configured locker, one accessory (categorised as an air quality sensor) with:
 
 - An **Air Quality Sensor**: AirQuality level (computed from the worse of PM2.5/PM10 using the Polish GIOS index bands) plus PM2.5, PM10 and - when reported - NO2 and O3 density
 - A linked **Temperature Sensor** (only populated when the locker reports temperature)
 - A linked **Humidity Sensor** (only populated when the locker reports humidity)
 
-Each layer can be turned off in the plugin settings (see `showPM`, `showGases`, `showTemperature`, `showHumidity` below); disabling one also removes a tile that was added earlier. The Homebridge log always shows the full payload, regardless of exposure settings.
+Each layer can be turned off in the plugin settings (see `showPM`, `showGases`, `showTemperature`, `showHumidity` below); disabling one also removes a tile that was added earlier. The Homebridge log always shows the full payload, regardless of exposure settings. Optional `labels` give each locker a friendly name, which HomeKit prefixes onto its tiles.
 
 PM1, PM4 and pressure have no HomeKit equivalent and are logged only.
 
@@ -48,6 +48,9 @@ Via the Homebridge UI (Settings > InPost Air) or manually in `config.json`:
       "platform": "InPostAir",
       "name": "InPost Air",
       "lockers": ["ABC01A"],
+      "labels": {
+        "ABC01A": "Street corner"
+      },
       "refreshIntervalMinutes": 10,
       "showPM": true,
       "showGases": true,
@@ -61,7 +64,8 @@ Via the Homebridge UI (Settings > InPost Air) or manually in `config.json`:
 | Option | Description | Default |
 |---|---|---|
 | `lockers` | Paczkomat locker codes (visible in the InPost app or on inpost.pl) | - |
-| `refreshIntervalMinutes` | Poll interval, 5-60 minutes. The sensors publish roughly hourly, so 10-30 is plenty | 10 |
+| `labels` | Optional friendly name per locker code, used for accessory and tile names | `Paczkomat <CODE>` |
+| `refreshIntervalMinutes` | Poll interval, 5-60 minutes. The sensors publish roughly hourly, so 10-30 is plenty. Overlapping slow polls are skipped automatically | 10 |
 | `userAgent` | Leave empty for the default honest UA (`homebridge-inpost-air (...)`), which works best against InPost's anti-bot protection. Set to `"browser"` to mimic a Chrome User-Agent instead | honest UA |
 | `showPM` | Show PM2.5/PM10 density inside the Air Quality sensor | true |
 | `showGases` | Show NO2/O3 density (only units that report gases) | true |
@@ -82,7 +86,7 @@ There is no official API for the sensor values, so the plugin uses the same undo
 
 1. **fetch transport**: reads the locker's public page on inpost.pl (URL derived from the public `points.json` list), extracts the internal sensor id from the page's `data-shipx-url` attribute, keeps the session cookies, and POSTs `inpost.pl/shipx-point-data/<id>/<code>/air_index_level`. Works out of the box on current Node.js versions; known caveat: Node's fetch drops `Set-Cookie` seen on redirect responses, which can strand the POST behind Cloudflare's 403.
 2. **curl transport**: if fetch gets 403 or fails, the plugin repeats the flow with the system `curl` binary using an on-disk cookie jar (`$TMPDIR/inpost-air-<CODE>.cookies`). Uses the browser User-Agent deliberately. Passes Cloudflare where undici does not.
-3. **ShipX degraded mode**: if both transports are blocked, the plugin queries the official `api-shipx-pl.easypack24.net/v1/points/<code>` endpoint for the coarse `air_index_level` string and publishes just the HomeKit AirQuality level (no PM numbers), so the accessory stays informative instead of going dark.
+3. **ShipX degraded mode**: if both transports are blocked, the plugin queries the official `api-shipx-pl.easypack24.net/v1/points/<code>` endpoint for the coarse `air_index_level` string and publishes just the HomeKit AirQuality level (no PM numbers), so the accessory stays informative instead of going dark. The plugin warns once when blocking starts and again when it recovers, so logs stay quiet in a long blocked stretch.
 
 Requirements: Node.js >= 18 (18+ for `fetch`, 22/24 tested), and `curl` present on the host for transport 2 (installed by default on Raspberry Pi OS, Docker images and macOS).
 
@@ -95,8 +99,9 @@ Each poll logs one info line with every parsed value and the raw payload field l
 ```
 
 - `payload fields` without `TEMPERATURE`/`HUMIDITY` = the hardware published no such data at that moment (PM-only payload)
-- `reports no air sensors (or data is not published)` = backend 404 for that locker; pick a different code from the ShipX list above
+- `reports no air sensors (or data is not published)` = backend 404 for that locker; retried automatically after 24 hours. For a permanent fix, pick a different code from the ShipX list above
 - `Detailed sensor data blocked (...)` = both transports were denied and the plugin fell back to the ShipX coarse level; start `homebridge -D` to see the full raw payloads
+- HomeKit tiles named after a locker code instead of something readable = set `labels`
 
 ## Publishing to npm (maintainers)
 
