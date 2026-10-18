@@ -40,7 +40,7 @@
         "description": "Leave empty to identify honestly as homebridge-inpost-air. Set to 'browser' to mimic a Chrome User-Agent (may help or hurt against anti-bot protection)."
       },
       "showPM": {
-        "title": "Hide PM2.5/PM10 density (versions: units that report particulates only)",
+        "title": "Show PM2.5/PM10 density",
         "type": "boolean",
         "default": true,
         "description": "Show PM2.5/PM10 density inside the Air Quality sensor. Uncheck to hide."
