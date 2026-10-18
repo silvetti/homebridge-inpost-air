@@ -9,7 +9,7 @@ InPost has been fitting Envic-Sense air quality units to Paczkomat parcel locker
 - Some units: temperature, humidity
 - Some units: atmospheric pressure
 
-Not every paczkomat has a sensor, some have a sensor that publishes no data (the endpoint answers 404), and PM-only units are common - for those only the particulate characteristics populate in HomeKit. There is no way to know a unit's capabilities in advance; the plugin logs the exact payload fields on every poll.
+Not every paczkomat has a sensor, some have a sensor that publishes no data (the endpoint answers 404), and PM-only units are common - for those only the particulate characteristics populate in HomeKit. Payloads can also change over time: the same unit may publish PM-only one hour and full data (including temperature and humidity) the next. There is no way to know a unit's capabilities in advance; the plugin logs the exact payload fields on every poll.
 
 ## What appears in HomeKit
 
@@ -18,6 +18,8 @@ Per configured locker, one accessory with:
 - An **Air Quality Sensor**: AirQuality level (computed from the worse of PM2.5/PM10 using the Polish GIOS index bands) plus PM2.5, PM10 and - when reported - NO2 and O3 density
 - A linked **Temperature Sensor** (only populated when the locker reports temperature)
 - A linked **Humidity Sensor** (only populated when the locker reports humidity)
+
+Each layer can be turned off in the plugin settings (see `showPM`, `showGases`, `showTemperature`, `showHumidity` below); disabling one also removes a tile that was added earlier. The Homebridge log always shows the full payload, regardless of exposure settings.
 
 PM1, PM4 and pressure have no HomeKit equivalent and are logged only.
 
@@ -46,7 +48,11 @@ Via the Homebridge UI (Settings > InPost Air) or manually in `config.json`:
       "platform": "InPostAir",
       "name": "InPost Air",
       "lockers": ["ABC01A"],
-      "refreshIntervalMinutes": 10
+      "refreshIntervalMinutes": 10,
+      "showPM": true,
+      "showGases": true,
+      "showTemperature": true,
+      "showHumidity": true
     }
   ]
 }
@@ -57,6 +63,10 @@ Via the Homebridge UI (Settings > InPost Air) or manually in `config.json`:
 | `lockers` | Paczkomat locker codes (visible in the InPost app or on inpost.pl) | - |
 | `refreshIntervalMinutes` | Poll interval, 5-60 minutes. The sensors publish roughly hourly, so 10-30 is plenty | 10 |
 | `userAgent` | Leave empty for the default honest UA (`homebridge-inpost-air (...)`), which works best against InPost's anti-bot protection. Set to `"browser"` to mimic a Chrome User-Agent instead | honest UA |
+| `showPM` | Show PM2.5/PM10 density inside the Air Quality sensor | true |
+| `showGases` | Show NO2/O3 density (only units that report gases) | true |
+| `showTemperature` | Expose the linked Temperature tile | true |
+| `showHumidity` | Expose the linked Humidity tile | true |
 
 ### Finding lockers that publish data
 
@@ -81,10 +91,10 @@ Requirements: Node.js >= 18 (18+ for `fetch`, 22/24 tested), and `curl` present 
 Each poll logs one info line with every parsed value and the raw payload field list, e.g.:
 
 ```
-[ABC210M] 1028.1 hPa, PM1=0.86, PM2.5=1.71, PM4=n/a, PM10=1.86 | AQ=Excellent | payload fields: PM1/PM25/PM10/PRESSURE
+[ABC210M] 13.3 degC, 80.6 pct RH, 1028.1 hPa, PM1=0.86, PM2.5=1.71, PM4=n/a, PM10=1.86 | AQ=Excellent | payload fields: PM1/PM25/PM10/PRESSURE/HUMIDITY/TEMPERATURE
 ```
 
-- `payload fields` without `TEMPERATURE`/`HUMIDITY` = the hardware simply does not report them (PM-only unit)
+- `payload fields` without `TEMPERATURE`/`HUMIDITY` = the hardware published no such data at that moment (PM-only payload)
 - `reports no air sensors (or data is not published)` = backend 404 for that locker; pick a different code from the ShipX list above
 - `Detailed sensor data blocked (...)` = both transports were denied and the plugin fell back to the ShipX coarse level; start `homebridge -D` to see the full raw payloads
 

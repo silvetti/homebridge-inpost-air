@@ -4,7 +4,11 @@
  * homebridge-inpost-air
  *
  * Exposes InPost Paczkomat parcel-locker air quality sensors as HomeKit
- * accessories.
+ * accessories. Units vary: some publish PM values only, others also
+ * temperature / humidity / NO2 / O3. Payload field sets can change over
+ * time, so each layer (PM, gases, temperature, humidity) can be toggled
+ * off in the plugin config; disabled layers are also removed from a
+ * previously cached accessory on restart.
  *
  * InPost's air data sits behind Cloudflare: a POST without the session
  * cookies set by the locker page is rejected with 403. Two transports:
@@ -193,6 +197,16 @@ class InPostAirPlatform {
     const uaOpt = String(this.config.userAgent || '').trim();
     this.userAgent = uaOpt === 'browser' ? BROWSER_UA : (uaOpt || DEFAULT_UA);
 
+    // Exposure toggles: which layers (when the unit reports them) surface
+    // in HomeKit. Logs always show the full payload regardless.
+    const cfg = this.config;
+    this.exposure = {
+      pm: cfg.showPM !== false,
+      gases: cfg.showGases !== false,
+      temperature: cfg.showTemperature !== false,
+      humidity: cfg.showHumidity !== false,
+    };
+
     if (!Array.isArray(this.config.lockers) || this.config.lockers.length === 0) {
       this.log.warn(
         'No paczkomat locker codes configured. Add a "lockers" array of locker codes '
@@ -273,24 +287,67 @@ class InPostLockerAccessory {
       .setCharacteristic(this.Characteristic.Model, 'Paczkomat air sensor')
       .setCharacteristic(this.Characteristic.SerialNumber, lockerCode);
 
+    const C = this.Characteristic;
+    const exposure = this.platform.exposure;
+
     this.airService = accessory.getService(this.Service.AirQualitySensor)
       || accessory.addService(this.Service.AirQualitySensor, `Air Quality ${lockerCode}`, 'air-quality');
-    this.tempService = accessory.getService(this.Service.TemperatureSensor)
-      || accessory.addService(this.Service.TemperatureSensor, `Temperature ${lockerCode}`, 'temperature');
-    this.humService = accessory.getService(this.Service.HumiditySensor)
-      || accessory.addService(this.Service.HumiditySensor, `Humidity ${lockerCode}`, 'humidity');
 
-    if (!this.airService.linkedServices.includes(this.tempService)) {
-      this.airService.addLinkedService(this.tempService);
-    }
-    if (!this.airService.linkedServices.includes(this.humService)) {
-      this.airService.addLinkedService(this.humService);
+    // Prune characteristics that a previous (wider) config added but that
+    // are now disabled: HomeKit keeps cached characteristics around
+    // otherwise.
+    const prune = (chars, enabled) => {
+      if (enabled) return;
+      for (const ch of chars) {
+        try {
+          if (this.airService.testCharacteristic(ch)) {
+            this.airService.removeCharacteristic(ch);
+          }
+        } catch {
+          // ignore: characteristic may not be removable in older homebridge
+        }
+      }
+    };
+    prune([C.PM2_5Density, C.PM10Density], exposure.pm);
+    prune([C.NitrogenDioxideDensity, C.OzoneDensity], exposure.gases);
+
+    // Linked services are created only when enabled; if a previous config
+    // created one that is now disabled, unlink and remove it so HomeKit
+    // drops the tile too.
+    const ensureService = (ctor, displayName, subtype, enabled) => {
+      const existing = accessory.getService(ctor);
+      if (!enabled) {
+        if (existing) {
+          const idx = this.airService.linkedServices.indexOf(existing);
+          if (idx >= 0) {
+            this.airService.linkedServices.splice(idx, 1);
+          }
+          accessory.removeService(existing);
+        }
+        return null;
+      }
+      return existing || accessory.addService(ctor, displayName, subtype);
+    };
+
+    this.tempService = ensureService(
+      this.Service.TemperatureSensor, `Temperature ${lockerCode}`, 'temperature', exposure.temperature,
+    );
+    this.humService = ensureService(
+      this.Service.HumiditySensor, `Humidity ${lockerCode}`, 'humidity', exposure.humidity,
+    );
+
+    for (const svc of [this.tempService, this.humService]) {
+      if (svc && !this.airService.linkedServices.includes(svc)) {
+        this.airService.addLinkedService(svc);
+      }
     }
 
-    // Parcel lockers are outdoors: allow sub-zero winter readings.
-    this.tempService
-      .getCharacteristic(this.Characteristic.CurrentTemperature)
-      .setProps({ minValue: -50, maxValue: 70 });
+    if (this.tempService) {
+      // Parcel lockers are outdoors: allow sub-zero winter readings.
+      this.tempService
+        .getCharacteristic(C.CurrentTemperature)
+        .setProps({ minValue: -50, maxValue: 70 });
+    }
 
     const minutes = Math.max(5, Number(this.platform.config.refreshIntervalMinutes) || 10);
     this.refresh();
@@ -490,27 +547,34 @@ class InPostLockerAccessory {
 
   applyData(data, indexLevel, rawLines) {
     const C = this.Characteristic;
+    const exposure = this.platform.exposure;
     const aq = airQualityFromData(data, indexLevel);
 
     this.airService.updateCharacteristic(C.StatusActive, true);
     if (aq != null) {
       this.airService.updateCharacteristic(C.AirQuality, aq);
     }
-    if (data.pm25 != null) this.airService.updateCharacteristic(C.PM2_5Density, data.pm25);
-    if (data.pm10 != null) this.airService.updateCharacteristic(C.PM10Density, data.pm10);
-    if (data.no2 != null) this.airService.updateCharacteristic(C.NitrogenDioxideDensity, data.no2);
-    if (data.o3 != null) this.airService.updateCharacteristic(C.OzoneDensity, data.o3);
-    if (data.temperature != null) {
+    if (exposure.pm) {
+      if (data.pm25 != null) this.airService.updateCharacteristic(C.PM2_5Density, data.pm25);
+      if (data.pm10 != null) this.airService.updateCharacteristic(C.PM10Density, data.pm10);
+    }
+    if (exposure.gases) {
+      if (data.no2 != null) this.airService.updateCharacteristic(C.NitrogenDioxideDensity, data.no2);
+      if (data.o3 != null) this.airService.updateCharacteristic(C.OzoneDensity, data.o3);
+    }
+    if (this.tempService && data.temperature != null) {
       this.tempService.updateCharacteristic(
         C.CurrentTemperature, Math.min(70, Math.max(-50, data.temperature)),
       );
     }
-    if (data.humidity != null) {
+    if (this.humService && data.humidity != null) {
       this.humService.updateCharacteristic(
         C.CurrentRelativeHumidity, Math.min(100, Math.max(0, data.humidity)),
       );
     }
 
+    // The log line always reports the complete payload, independent of
+    // exposure settings - that is how unit capabilities are discovered.
     const parts = [
       data.temperature != null ? `${data.temperature} degC` : null,
       data.humidity != null ? `${data.humidity} pct RH` : null,

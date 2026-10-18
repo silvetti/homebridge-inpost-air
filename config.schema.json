@@ -3,7 +3,7 @@
   "pluginType": "platform",
   "singular": false,
   "headerDisplay": "Exposes air quality data from InPost Paczkomat parcel-locker sensors in Poland as HomeKit accessories. The plugin uses an unofficial (undocumented) InPost endpoint and may break if InPost changes their site.",
-  "footerDisplay": "Find locker codes (e.g. ABC01A) in the InPost app or on inpost.pl. Keep the refresh interval at 10 minutes or more to avoid being rate-limited/blocked.",
+  "footerDisplay": "Find locker codes (e.g. ABC01A) in the InPost app or on inpost.pl. Exposure toggles apply after a Homebridge restart; disabling one removes the corresponding HomeKit tile/data. Logs always show the full payload from the unit.",
   "schema": {
     "type": "object",
     "properties": {
@@ -38,6 +38,30 @@
         "type": "string",
         "required": false,
         "description": "Leave empty to identify honestly as homebridge-inpost-air. Set to 'browser' to mimic a Chrome User-Agent (may help or hurt against anti-bot protection)."
+      },
+      "showPM": {
+        "title": "Hide PM2.5/PM10 density (versions: units that report particulates only)",
+        "type": "boolean",
+        "default": true,
+        "description": "Show PM2.5/PM10 density inside the Air Quality sensor. Uncheck to hide."
+      },
+      "showGases": {
+        "title": "Show NO2/O3 density",
+        "type": "boolean",
+        "default": true,
+        "description": "Show NO2/O3 density inside the Air Quality sensor (only units that report gases). Uncheck to hide."
+      },
+      "showTemperature": {
+        "title": "Show Temperature sensor",
+        "type": "boolean",
+        "default": true,
+        "description": "Expose a linked Temperature tile (populated on units that report temperature). Uncheck to remove it."
+      },
+      "showHumidity": {
+        "title": "Show Humidity sensor",
+        "type": "boolean",
+        "default": true,
+        "description": "Expose a linked Humidity tile (populated on units that report humidity). Uncheck to remove it."
       }
     }
   }
