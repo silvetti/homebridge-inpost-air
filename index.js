@@ -23,6 +23,7 @@
 const { execFile } = require('child_process');
 const os = require('os');
 const path = require('path');
+const { version } = require('./package.json');
 
 const PLUGIN_NAME = 'homebridge-inpost-air';
 const PLATFORM_NAME = 'InPostAir';
@@ -305,7 +306,8 @@ class InPostLockerAccessory {
     info
       .setCharacteristic(this.Characteristic.Manufacturer, 'InPost')
       .setCharacteristic(this.Characteristic.Model, 'Paczkomat air sensor')
-      .setCharacteristic(this.Characteristic.SerialNumber, lockerCode);
+      .setCharacteristic(this.Characteristic.SerialNumber, lockerCode)
+      .setCharacteristic(this.Characteristic.FirmwareRevision, version);
 
     const C = this.Characteristic;
     const exposure = this.platform.exposure;
