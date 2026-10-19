@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * homebridge-inpost-air (v1.1.0)
+ * homebridge-inpost-air
  *
  * Exposes InPost Paczkomat parcel-locker air quality sensors as HomeKit
  * accessories. Units vary: some publish PM values only, others also
@@ -17,11 +17,13 @@
  *   2. curl:  same flow via the system curl binary with a cookie jar -
  *      different TLS stack and reliable cookie handling; used when fetch
  *      is blocked (greencity.pl is a marketing SPA and NOT a data source).
+ *      The jar lives in the plugin's directory inside the Homebridge
+ *      storage path (a Homebridge verified-plugin requirement).
  * If both fail, degrade to the official public ShipX API coarse level.
  */
 
 const { execFile } = require('child_process');
-const os = require('os');
+const fs = require('fs');
 const path = require('path');
 const { version } = require('./package.json');
 
@@ -121,7 +123,7 @@ function parseSensorLines(lines) {
   for (const line of lines || []) {
     if ((m = line.match(/^PM25:([\d.]+):([\d.]+)/))) {
       data.pm25 = toFloat(m[1]);
-      data.pm25Norm = toFloat(m[2]);
+      data.pm25Norm = toFloat(m[1]);
     } else if ((m = line.match(/^PM10:([\d.]+):([\d.]+)/))) {
       data.pm10 = toFloat(m[1]);
       data.pm10Norm = toFloat(m[2]);
@@ -210,6 +212,15 @@ class InPostAirPlatform {
       ? this.config.labels
       : {};
 
+    // Files the plugin writes (curl cookie jars per locker) must live in
+    // the Homebridge storage directory, per verified-plugin requirements.
+    this.storageDir = path.join(api.user.storagePath(), PLUGIN_NAME);
+    try {
+      fs.mkdirSync(this.storageDir, { recursive: true });
+    } catch (err) {
+      this.log.warn(`Could not create storage directory ${this.storageDir}: ${err.message}`);
+    }
+
     // Exposure toggles: which layers (when the unit reports them) surface
     // in HomeKit. Logs always show the full payload regardless.
     const cfg = this.config;
@@ -296,7 +307,7 @@ class InPostLockerAccessory {
     this.pageUrl = null;
     this.lockerId = null;
     this.cookies = null;
-    this.jarPath = path.join(os.tmpdir(), `inpost-air-${lockerCode}.cookies`);
+    this.jarPath = path.join(platform.storageDir, `${lockerCode}.cookies`);
 
     this.refreshing = false;
     this.blocked = false;

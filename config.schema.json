@@ -6,18 +6,17 @@
   "footerDisplay": "Find locker codes (e.g. ABC01A) in the InPost app or on inpost.pl. Exposure toggles apply after a Homebridge restart; disabling one removes the corresponding HomeKit tile/data. Lockers where the backend reports no sensor data are retried once per day. Logs always show the full payload from the unit.",
   "schema": {
     "type": "object",
+    "required": ["name", "lockers"],
     "properties": {
       "name": {
         "title": "Name",
         "type": "string",
         "default": "InPost Air",
-        "required": true,
         "placeholder": "InPost Air"
       },
       "lockers": {
         "title": "Paczkomat locker codes",
         "type": "array",
-        "required": true,
         "minItems": 1,
         "items": {
           "title": "Locker code",
@@ -44,7 +43,6 @@
       "userAgent": {
         "title": "User-Agent",
         "type": "string",
-        "required": false,
         "description": "Leave empty to identify honestly as homebridge-inpost-air. Set to 'browser' to mimic a Chrome User-Agent (may help or hurt against anti-bot protection)."
       },
       "showPM": {

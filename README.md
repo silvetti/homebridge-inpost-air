@@ -85,7 +85,7 @@ node -e "let f=[];(async()=>{for(let p=1;;p++){const j=await(await fetch('https:
 There is no official API for the sensor values, so the plugin uses the same undocumented endpoint the InPost website calls, behind Cloudflare anti-bot protection. Three stages, in order:
 
 1. **fetch transport**: reads the locker's public page on inpost.pl (URL derived from the public `points.json` list), extracts the internal sensor id from the page's `data-shipx-url` attribute, keeps the session cookies, and POSTs `inpost.pl/shipx-point-data/<id>/<code>/air_index_level`. Works out of the box on current Node.js versions; known caveat: Node's fetch drops `Set-Cookie` seen on redirect responses, which can strand the POST behind Cloudflare's 403.
-2. **curl transport**: if fetch gets 403 or fails, the plugin repeats the flow with the system `curl` binary using an on-disk cookie jar (`$TMPDIR/inpost-air-<CODE>.cookies`). Uses the browser User-Agent deliberately. Passes Cloudflare where undici does not.
+2. **curl transport**: if fetch gets 403 or fails, the plugin repeats the flow with the system `curl` binary using an on-disk cookie jar (`<Homebridge storage>/homebridge-inpost-air/<CODE>.cookies`). Uses the browser User-Agent deliberately. Passes Cloudflare where undici does not.
 3. **ShipX degraded mode**: if both transports are blocked, the plugin queries the official `api-shipx-pl.easypack24.net/v1/points/<code>` endpoint for the coarse `air_index_level` string and publishes just the HomeKit AirQuality level (no PM numbers), so the accessory stays informative instead of going dark. The plugin warns once when blocking starts and again when it recovers, so logs stay quiet in a long blocked stretch.
 
 Requirements: Node.js >= 18 (18+ for `fetch`, 22/24 tested), and `curl` present on the host for transport 2 (installed by default on Raspberry Pi OS, Docker images and macOS).
@@ -112,6 +112,10 @@ bump version in package.json -> push -> create GitHub release vX.Y.Z -> done
 ```
 
 npm records a provenance attestation for every release, linking the tarball to this repository.
+
+## Verified-badge compliance notes
+
+This plugin follows the Homebridge verified-plugin requirements: it uses no runtime dependencies beyond Node core and the system `curl`, writes its only on-disk state (curl cookie jars) exclusively inside the Homebridge storage directory (`<Homebridge storage>/homebridge-inpost-air/`), handles configuration through `config.schema.json`, and never clears the Homebridge log or spawn uncontrolled daemons.
 
 ## Caveats
 
