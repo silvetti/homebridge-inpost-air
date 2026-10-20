@@ -231,11 +231,19 @@ class InPostAirPlatform {
       humidity: cfg.showHumidity !== false,
     };
 
-    if (!Array.isArray(this.config.lockers) || this.config.lockers.length === 0) {
+    // Normalize locker codes up front. With none configured, the plugin
+    // does not start at all: no launch listener, no accessories, no
+    // timers (verified-plugin requirement).
+    this.lockerCodes = [...new Set(
+      (this.config.lockers || []).map((c) => String(c).trim().toUpperCase()).filter(Boolean),
+    )];
+
+    if (this.lockerCodes.length === 0) {
       this.log.warn(
-        'No paczkomat locker codes configured. Add a "lockers" array of locker codes '
-        + '(e.g. ["ABC01A"]) to the platform config.',
+        'homebridge-inpost-air is not starting: no paczkomat locker codes configured. '
+        + 'Set the "lockers" option (e.g. ["ABC01A"]) and restart.',
       );
+      return;
     }
 
     this.api.on('didFinishLaunching', () => this.setup().catch(
@@ -248,9 +256,7 @@ class InPostAirPlatform {
   }
 
   async setup() {
-    const codes = [...new Set(
-      (this.config.lockers || []).map((c) => String(c).trim().toUpperCase()).filter(Boolean),
-    )];
+    const codes = this.lockerCodes;
     const keep = new Set();
 
     for (const code of codes) {
